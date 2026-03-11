@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,370 +8,327 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
-  ActivityIndicator,
 } from 'react-native';
-import { NavigationContainer, useNavigation, useRoute } from '@react-navigation/native';
-import { createNativeStackNavigator, NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { usePedometer } from 'expo-sensors';
 
-// Define Root Stack Navigator Types
-type RootStackParamList = {
-  Home: undefined;
-  Search: undefined;
-  Profile: undefined;
+const { width } = Dimensions.get('window');
+
+// --- Mock Data Generators ---
+
+const generateConsistencyData = () => {
+  // Generates 14 weeks (approx 3 months) of random data
+  return Array.from({ length: 98 }, () => Math.floor(Math.random() * 4));
 };
 
-type RootStackNavigationProp = NativeStackNavigationProp<RootStackParamList>;
+// --- Sub-Components ---
 
-// Placeholder components for demonstration
-const Header = () => (
-  <View style={styles.header}>
-    <Text style={styles.headerTitle}>Dashboard</Text>
-    <TouchableOpacity style={styles.iconButton}>
-      <Ionicons name="notifications-outline" size={24} color="#fff" />
-    </TouchableOpacity>
+const AlarmCard = ({ time, condition, active, icon }: any) => (
+  <View style={[styles.alarmCard, active ? styles.activeAlarm : styles.inactiveAlarm]}>
+    <View style={styles.alarmHeader}>
+      <Text style={[styles.alarmTime, !active && { opacity: 0.5 }]}>{time}</Text>
+      <View style={[styles.toggle, active ? styles.toggleOn : styles.toggleOff]}>
+        <View style={[styles.toggleCircle, active ? { alignSelf: 'flex-end' } : { alignSelf: 'flex-start' }]} />
+      </View>
+    </View>
+    <View style={styles.badgeContainer}>
+      <Ionicons name={icon} size={14} color={active ? "#00E5FF" : "#94a3b8"} />
+      <Text style={[styles.badgeText, { color: active ? "#00E5FF" : "#94a3b8" }]}>
+        {condition.toUpperCase()}
+      </Text>
+    </View>
+    {active && (
+      <TouchableOpacity style={styles.solveButton}>
+        <Text style={styles.solveButtonText}>SOLVE TO STOP</Text>
+      </TouchableOpacity>
+    )}
   </View>
 );
 
-interface StatCardProps {
-  title: string;
-  value: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  color: string;
-}
-
-const StatCard = ({ title, value, icon, color }: StatCardProps) => (
-  <View style={[styles.card, { backgroundColor: color }]}>
-    <View style={styles.cardHeader}>
-      <Text style={styles.cardTitle}>{title}</Text>
-      <Ionicons name={icon} size={20} color="#fff" />
-    </View>
-    <Text style={styles.cardValue}>{value}</Text>
-  </View>
-);
-
-const RecentActivity = () => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>Recent Activity</Text>
-    <View style={styles.activityItem}>
-      <View style={[styles.activityIcon, { backgroundColor: '#e3f2fd' }]}>
-        <Ionicons name="cart" size={20} color="#2196f3" />
-      </View>
-      <View style={styles.activityDetails}>
-        <Text style={styles.activityText}>New Order #1234</Text>
-        <Text style={styles.activitySubtext}>2 minutes ago</Text>
-      </View>
-      <Text style={styles.activityAmount}>+$120.00</Text>
-    </View>
-    <View style={styles.activityItem}>
-      <View style={[styles.activityIcon, { backgroundColor: '#e8f5e9' }]}>
-        <Ionicons name="checkmark-circle" size={20} color="#4caf50" />
-      </View>
-      <View style={styles.activityDetails}>
-        <Text style={styles.activityText}>Payment Received</Text>
-        <Text style={styles.activitySubtext}>1 hour ago</Text>
-      </View>
-      <Text style={styles.activityAmount}>+$450.00</Text>
-    </View>
-  </View>
-);
-
-interface BottomNavProps {
-  activeTab: string;
-  onTabChange: (tab: string) => void;
-}
-
-const BottomNav = ({ activeTab, onTabChange }: BottomNavProps) => {
-  const navigation = useNavigation<RootStackNavigationProp>();
-
-  const handlePress = useCallback((screen: keyof RootStackParamList) => {
-    onTabChange(screen);
-    // Logic to navigate using the actual navigation prop
-    if (screen !== activeTab) {
-      navigation.navigate(screen);
-    }
-  }, [activeTab, navigation, onTabChange]);
-
+const ConsistencyGrid = () => {
+  const data = generateConsistencyData();
   return (
-    <View style={styles.bottomNav}>
-      <TouchableOpacity 
-        style={styles.navItem} 
-        onPress={() => handlePress('Home')}
-      >
-        <Ionicons 
-          name="home" 
-          size={24} 
-          color={activeTab === 'Home' ? '#2196f3' : '#9e9e9e'} 
-        />
-        <Text style={[styles.navText, { color: activeTab === 'Home' ? '#2196f3' : '#9e9e9e' }]}>Home</Text>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        style={styles.navItem} 
-        onPress={() => handlePress('Search')}
-      >
-        <Ionicons 
-          name="search" 
-          size={24} 
-          color={activeTab === 'Search' ? '#2196f3' : '#9e9e9e'} 
-        />
-        <Text style={[styles.navText, { color: activeTab === 'Search' ? '#2196f3' : '#9e9e9e' }]}>Search</Text>
-      </TouchableOpacity>
-      <TouchableOpacity 
-        style={styles.navItem} 
-        onPress={() => handlePress('Profile')}
-      >
-        <Ionicons 
-          name="person" 
-          size={24} 
-          color={activeTab === 'Profile' ? '#2196f3' : '#9e9e9e'} 
-        />
-        <Text style={[styles.navText, { color: activeTab === 'Profile' ? '#2196f3' : '#9e9e9e' }]}>Profile</Text>
-      </TouchableOpacity>
+    <View style={styles.gridContainer}>
+      <Text style={styles.sectionLabel}>Wake-up Consistency (3:00 AM)</Text>
+      <View style={styles.githubGrid}>
+        {data.map((level, i) => (
+          <View 
+            key={i} 
+            style={[
+              styles.gridSquare, 
+              { backgroundColor: level === 0 ? '#1e293b' : level === 1 ? '#064e3b' : level === 2 ? '#059669' : '#10b981' }
+            ]} 
+          />
+        ))}
+      </View>
+      <View style={styles.gridFooter}>
+        <Text style={styles.gridFooterText}>Less</Text>
+        {[0, 1, 2, 3].map(l => (
+           <View key={l} style={[styles.miniSquare, { backgroundColor: l === 0 ? '#1e293b' : l === 1 ? '#064e3b' : l === 2 ? '#059669' : '#10b981' }]} />
+        ))}
+        <Text style={styles.gridFooterText}>More</Text>
+      </View>
     </View>
   );
 };
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+// --- Main Screen ---
 
 export default function MainScreen() {
-  const [activeTab, setActiveTab] = useState('Home');
-  const { steps, isAvailable, startPedometerAsync, stopPedometerAsync } = usePedometer();
-
-  // Initialize Pedometer logic
-  useEffect(() => {
-    const initPedometer = async () => {
-      if (isAvailable) {
-        try {
-          await startPedometerAsync({
-            updateIntervalMs: 1000,
-          });
-        } catch (error) {
-          console.error('Failed to start pedometer:', error);
-        }
-      }
-    };
-
-    initPedometer();
-
-    return () => {
-      stopPedometerAsync();
-    };
-  }, [isAvailable, startPedometerAsync, stopPedometerAsync]);
-
-  // Update active tab based on navigation state
-  const route = useRoute();
-  useEffect(() => {
-    if (route.name) {
-      setActiveTab(route.name as string);
-    }
-  }, [route.name]);
+  const [tasks, setTasks] = useState([
+    { id: 1, text: 'Deep Work Session (2 hours)', completed: true },
+    { id: 2, text: 'Gym Workout (1 hour)', completed: false },
+    { id: 3, text: 'Review Weekly Plan', completed: false },
+  ]);
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
-      <Header />
+      <StatusBar barStyle="light-content" />
       
-      <ScrollView 
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.statsContainer}>
-          <StatCard 
-            title="Total Revenue" 
-            value="$12,450" 
-            icon="trending-up" 
-            color="#2196f3" 
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Rise & Shine</Text>
+        <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        
+        {/* 1. Top Section: Alarms */}
+        <Text style={styles.sectionLabel}>Upcoming Alarms</Text>
+        <View style={styles.alarmRow}>
+          <AlarmCard 
+            time="3:00 AM" 
+            condition="3 Math Problems" 
+            active={true} 
+            icon="calculator"
           />
-          <StatCard 
-            title="Active Users" 
-            value="1,240" 
-            icon="people" 
-            color="#4caf50" 
+          <AlarmCard 
+            time="3:10 AM" 
+            condition="100 Steps" 
+            active={false} 
+            icon="walk"
           />
         </View>
 
-        <RecentActivity />
-        
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.actionsRow}>
-            <TouchableOpacity style={styles.actionButton}>
-              <Ionicons name="add-circle" size={24} color="#fff" />
-              <Text style={styles.actionText}>Add New</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#ff9800' }]}>
-              <Ionicons name="analytics" size={24} color="#fff" />
-              <Text style={styles.actionText}>Reports</Text>
-            </TouchableOpacity>
+        {/* 2. Middle Section: Tracker */}
+        <ConsistencyGrid />
+
+        {/* 3. Bottom Section: Agenda */}
+        <View style={styles.agendaContainer}>
+          <View style={styles.agendaHeader}>
+            <Text style={styles.sectionLabel}>Today's Objectives</Text>
+            <TouchableOpacity><Text style={styles.addText}>Add Task</Text></TouchableOpacity>
           </View>
-        </View>
-        
-        {/* Debug View for Pedometer */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pedometer Status</Text>
-          <View style={styles.activityItem}>
-            <View style={[styles.activityIcon, { backgroundColor: '#e0f7fa' }]}>
-              <Ionicons name="footsteps" size={20} color="#00bcd4" />
-            </View>
-            <View style={styles.activityDetails}>
-              <Text style={styles.activityText}>Steps Count</Text>
-              <Text style={styles.activitySubtext}>
-                {isAvailable ? 'Active' : 'Not Available'}
+          
+          {tasks.map(task => (
+            <TouchableOpacity key={task.id} style={styles.taskItem}>
+              <Ionicons 
+                name={task.completed ? "checkbox" : "square-outline"} 
+                size={22} 
+                color={task.completed ? "#00E5FF" : "#64748b"} 
+              />
+              <Text style={[styles.taskText, task.completed && styles.taskCompleted]}>
+                {task.text}
               </Text>
-            </View>
-            <Text style={styles.activityAmount}>{steps}</Text>
-          </View>
+            </TouchableOpacity>
+          ))}
         </View>
-      </ScrollView>
 
-      <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+        {/* Motivational Footer */}
+        <View style={styles.footerQuote}>
+          <Text style={styles.quoteText}>
+            "Discipline is choosing between what you want now and what you want most."
+          </Text>
+          <Text style={styles.quoteAuthor}>— Abraham Lincoln</Text>
+        </View>
+
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-const { width } = Dimensions.get('window');
+// --- Styles ---
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#0f172a', // Deep Charcoal/Black
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: '#1a1a2e',
-    paddingTop: 40,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
     color: '#fff',
-  },
-  iconButton: {
-    padding: 8,
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: 'System',
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 25,
-  },
-  card: {
-    flex: 1,
-    borderRadius: 15,
-    padding: 15,
-    marginHorizontal: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  cardTitle: {
-    color: 'rgba(255,255,255,0.8)',
+  sectionLabel: {
+    color: '#94a3b8',
     fontSize: 14,
-  },
-  cardValue: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: 'bold',
-  },
-  section: {
-    marginBottom: 25,
-  },
-  sectionTitle: {
-    fontSize: 18,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 15,
+    marginBottom: 12,
+    marginTop: 20,
   },
-  activityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  activityIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  activityDetails: {
-    flex: 1,
-  },
-  activityText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  activitySubtext: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  activityAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#4caf50',
-  },
-  actionsRow: {
+  alarmRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#6200ea',
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-    marginHorizontal: 5,
+  alarmCard: {
+    width: (width - 50) / 2,
+    borderRadius: 16,
+    padding: 16,
+    height: 150,
+    justifyContent: 'space-between',
   },
-  actionText: {
+  activeAlarm: {
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  inactiveAlarm: {
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    opacity: 0.6,
+  },
+  alarmTime: {
     color: '#fff',
+    fontSize: 28,
+    fontWeight: '800',
+  },
+  alarmHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  badgeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  toggle: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleOn: { backgroundColor: '#00E5FF' },
+  toggleOff: { backgroundColor: '#334155' },
+  toggleCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  solveButton: {
+    backgroundColor: '#00E5FF',
+    borderRadius: 8,
+    paddingVertical: 6,
+    alignItems: 'center',
+  },
+  solveButtonText: {
+    color: '#0f172a',
+    fontSize: 10,
+    fontWeight: '900',
+  },
+  // Grid Styles
+  gridContainer: {
+    marginTop: 20,
+    backgroundColor: '#111827',
+    padding: 16,
+    borderRadius: 16,
+  },
+  githubGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    width: '100%',
+  },
+  gridSquare: {
+    width: 10,
+    height: 10,
+    margin: 2,
+    borderRadius: 2,
+  },
+  gridFooter: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  gridFooterText: {
+    color: '#475569',
+    fontSize: 10,
+    marginHorizontal: 4,
+  },
+  miniSquare: {
+    width: 8,
+    height: 8,
+    marginHorizontal: 1,
+    borderRadius: 1,
+  },
+  // Agenda Styles
+  agendaContainer: {
+    marginTop: 20,
+  },
+  agendaHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  addText: {
+    color: '#00E5FF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  taskItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  taskText: {
+    color: '#e2e8f0',
+    fontSize: 15,
+    marginLeft: 12,
+  },
+  taskCompleted: {
+    textDecorationLine: 'line-through',
+    color: '#64748b',
+  },
+  footerQuote: {
+    marginTop: 40,
+    padding: 20,
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  quoteText: {
+    color: '#94a3b8',
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 20,
+    fontFamily: 'serif', // Editorial feel
+  },
+  quoteAuthor: {
+    color: '#64748b',
+    fontSize: 12,
     marginTop: 8,
     fontWeight: '600',
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-    paddingBottom: 20,
-    paddingTop: 10,
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  navText: {
-    fontSize: 12,
-    marginTop: 5,
-    color: '#9e9e9e',
   },
 });
