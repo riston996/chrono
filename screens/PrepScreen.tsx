@@ -7,17 +7,22 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics'; // Optional: for better UX
+
+import AlarmService from '../services/AlarmService';
 
 const { width } = Dimensions.get('window');
 
-// --- Mock Sleep Data (3 Months) ---
+// --- Mock Sleep Data ---
 const generateSleepData = () => {
   return Array.from({ length: 98 }, () => Math.floor(Math.random() * 5));
 };
 
 export default function PrepScreen() {
+  const [loadingId, setLoadingId] = useState<number | null>(null);
   const [tasks, setTasks] = useState([
     { id: 1, text: "Journal Today's Thoughts", icon: "pencil-outline", completed: false },
     { id: 2, text: "Set the Workspace for Tomorrow", icon: "desktop-outline", completed: false },
@@ -28,13 +33,29 @@ export default function PrepScreen() {
   const sleepData = useMemo(() => generateSleepData(), []);
   const allTasksDone = tasks.every(t => t.completed);
 
-  const toggleTask = (id: number) => {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
+  const handleToggleTask = async (id: number, currentStatus: boolean) => {
+    try {
+      setLoadingId(id);
+      // 1. Sync with your AlarmService
+      await AlarmService.toggleProtocol(id, !currentStatus);
+      
+      // 2. Trigger Haptics
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      // 3. Update local UI
+      setTasks(prev => 
+        prev.map(t => t.id === id ? { ...t, completed: !currentStatus } : t)
+      );
+    } catch (error) {
+      console.error("Failed to sync task:", error);
+    } finally {
+      setLoadingId(null);
+    }
   };
 
-  // Color mapping for Sleep Recovery History
   const getSleepColor = (level: number) => {
-    const colors = ['#1e293b', '#1e3a8a', '#1d4ed8', '#2563eb', '#60a5fa'];
+    // 0 is low recovery/rest, 4 is optimal recovery
+    const colors = ['#1e293b', '#1e3a8a', '#2563eb', '#3b82f6', '#60a5fa'];
     return colors[level];
   };
 
@@ -57,11 +78,20 @@ export default function PrepScreen() {
             <TouchableOpacity 
               key={task.id} 
               style={[styles.taskCard, task.completed && styles.taskCardCompleted]}
-              onPress={() => toggleTask(task.id)}
+              onPress={() => handleToggleTask(task.id, task.completed)}
+              disabled={loadingId === task.id}
               activeOpacity={0.7}
             >
               <View style={styles.taskLeft}>
-                <Ionicons name={task.icon as any} size={20} color={task.completed ? "#94a3b8" : "#93c5fd"} />
+                {loadingId === task.id ? (
+                  <ActivityIndicator size="small" color="#93c5fd" />
+                ) : (
+                  <Ionicons 
+                    name={task.icon as any} 
+                    size={20} 
+                    color={task.completed ? "#64748b" : "#93c5fd"} 
+                  />
+                )}
                 <Text style={[styles.taskText, task.completed && styles.taskTextCompleted]}>
                   {task.text}
                 </Text>
@@ -71,7 +101,7 @@ export default function PrepScreen() {
           ))}
         </View>
 
-        {/* 3. Sleep Recovery History (Blue Heatmap) */}
+        {/* 3. Sleep Recovery History (Heatmap) */}
         <View style={styles.gridContainer}>
           <Text style={styles.sectionLabel}>Sleep Recovery History</Text>
           <View style={styles.githubGrid}>
@@ -83,27 +113,30 @@ export default function PrepScreen() {
             ))}
           </View>
           <View style={styles.gridFooter}>
-            <Text style={styles.gridFooterText}>Lighter Blue (4-5 hrs)</Text>
+            <Text style={styles.gridFooterText}>Low Recovery</Text>
             <View style={styles.legend}>
               {[0, 1, 2, 3, 4].map(l => (
                 <View key={l} style={[styles.miniSquare, { backgroundColor: getSleepColor(l) }]} />
               ))}
             </View>
-            <Text style={styles.gridFooterText}>Darker Blue (8+ hrs)</Text>
+            <Text style={styles.gridFooterText}>Optimal Rest</Text>
           </View>
         </View>
 
         {/* 4. Completion State Message */}
-        {allTasksDone ? (
-          <View style={styles.completionCard}>
-            <Ionicons name="moon-outline" size={24} color="#93c5fd" style={{ marginBottom: 8 }} />
-            <Text style={styles.completionText}>Once all tasks are checked, system ready. Rest well.</Text>
-          </View>
-        ) : (
-          <View style={[styles.completionCard, { opacity: 0.3 }]}>
-            <Text style={styles.completionText}>Complete your routine to prime the system.</Text>
-          </View>
-        )}
+        <View style={[styles.completionCard, !allTasksDone && { opacity: 0.4 }]}>
+          <Ionicons 
+            name={allTasksDone ? "moon" : "moon-outline"} 
+            size={24} 
+            color={allTasksDone ? "#60a5fa" : "#94a3b8"} 
+            style={{ marginBottom: 8 }} 
+          />
+          <Text style={styles.completionText}>
+            {allTasksDone 
+              ? "System primed. You've completed your nightly protocol. Rest well."
+              : "Complete your routine to prime the system for tomorrow."}
+          </Text>
+        </View>
 
       </ScrollView>
     </SafeAreaView>
@@ -113,7 +146,7 @@ export default function PrepScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a', // Dark foundation
+    backgroundColor: '#0f172a',
   },
   scrollContent: {
     padding: 24,
@@ -124,33 +157,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 26,
+    fontWeight: '800',
     color: '#f8fafc',
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   windowBadge: {
     backgroundColor: '#1e293b',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#334155',
   },
   windowText: {
     color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   section: {
     marginBottom: 32,
   },
   sectionLabel: {
-    color: '#64748b',
-    fontSize: 14,
-    fontWeight: '700',
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     marginBottom: 16,
   },
   taskCard: {
@@ -159,23 +194,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     backgroundColor: '#1e293b',
     padding: 18,
-    borderRadius: 12,
+    borderRadius: 16,
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#334155',
   },
   taskCardCompleted: {
-    backgroundColor: '#0f172a',
-    borderColor: '#1e293b',
-    opacity: 0.6,
+    backgroundColor: 'rgba(30, 41, 59, 0.4)',
+    borderColor: 'transparent',
   },
   taskLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
   taskText: {
-    color: '#bfdbfe',
-    fontSize: 16,
+    color: '#f1f5f9',
+    fontSize: 15,
     marginLeft: 14,
     fontWeight: '500',
   },
@@ -189,40 +224,46 @@ const styles = StyleSheet.create({
   githubGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    width: '100%',
-    backgroundColor: '#111827',
+    justifyContent: 'center',
+    backgroundColor: '#020617',
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#1e293b',
   },
   gridSquare: {
-    width: (width - 100) / 14, // Fits roughly 14 columns
-    height: (width - 100) / 14,
+    // Dynamically calculate square size based on 14 columns
+    width: (width - 48 - 24 - (14 * 4)) / 14, 
+    height: (width - 48 - 24 - (14 * 4)) / 14,
     margin: 2,
-    borderRadius: 2,
+    borderRadius: 3,
   },
   gridFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 12,
+    paddingHorizontal: 4,
   },
   gridFooterText: {
     color: '#475569',
-    fontSize: 10,
+    fontSize: 11,
+    fontWeight: '500',
   },
   legend: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
   miniSquare: {
-    width: 10,
-    height: 10,
-    marginHorizontal: 1,
-    borderRadius: 2,
+    width: 8,
+    height: 8,
+    marginHorizontal: 2,
+    borderRadius: 1,
   },
   completionCard: {
     backgroundColor: '#1e293b',
     padding: 24,
-    borderRadius: 16,
+    borderRadius: 20,
     alignItems: 'center',
     borderStyle: 'dashed',
     borderWidth: 1,
@@ -233,5 +274,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     lineHeight: 22,
+    fontWeight: '500',
   },
 });

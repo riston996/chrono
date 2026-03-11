@@ -1,169 +1,150 @@
-import { Platform } from 'react-native';
+import * as SQLite from 'expo-sqlite';
 import { Audio } from 'expo-av';
-import { StepCounter } from 'expo-sensors';
+import { Accelerometer } from 'expo-sensors';
 
-// Types
-export type AlarmType = 'math' | 'pedometer';
+/**
+ * SOURCE OF TRUTH INTERFACES
+ * Matched to data structures found in ProfileScreen.tsx
+ */
 
-export interface MathQuestion {
-  id: number;
-  num1: number;
-  num2: number;
-  operator: '+' | '-' | '*';
-  answer: number;
+export interface ProtocolItem {
+  id?: number;
+  title: string;
+  time: string;
+  icon: string;
+  enabled: number; // 0 or 1 for SQLite compatibility
 }
 
-export interface AlarmConfig {
-  type: AlarmType;
-  mathQuestionsCount?: number;
-  pedometerStepsGoal?: number;
+export interface LifeLogEntry {
+  id?: number;
+  date: string;
+  text: string;
+  happiness: number;
+  deepWork: number;
 }
 
-export class AlarmService {
-  private static instance: AlarmService;
-  private audioPlayer: Audio.Sound | null = null;
-  private stepSubscription: StepCounter.StepCounterSubscription | null = null;
-  private mathQuestions: MathQuestion[] = [];
-  private currentQuestionIndex = 0;
-  private stepsGoal = 20;
-  private initialStepCount = 0;
-  private isAlarmActive = false;
+const DB_NAME = 'chrono_db';
+const db = SQLite.openDatabaseSync(DB_NAME);
 
-  private constructor() {}
-
-  public static getInstance(): AlarmService {
-    if (!AlarmService.instance) {
-      AlarmService.instance = new AlarmService();
-    }
-    return AlarmService.instance;
-  }
-
-  // --- Initialization ---
-
-  public async initialize(config: AlarmConfig): Promise<void> {
-    this.isAlarmActive = true;
-    this.stepsGoal = config.pedometerStepsGoal || 20;
-    this.initialStepCount = 0;
-
-    if (config.type === 'math') {
-      this.generateMathQuestions(config.mathQuestionsCount || 3);
-    }
-
-    if (Platform.OS !== 'web') {
-      await StepCounter.requestPermissionsAsync();
-      // Get initial step count to calculate delta
-      const initialSteps = await StepCounter.getStepCountAsync();
-      this.initialStepCount = initialSteps;
-    }
-  }
-
-  // --- Math Logic ---
-
-  private generateMathQuestions(count: number): void {
-    this.mathQuestions = [];
-    for (let i = 0; i < count; i++) {
-      const num1 = Math.floor(Math.random() * 10) + 1;
-      const num2 = Math.floor(Math.random() * 10) + 1;
-      const operators: ('+' | '-' | '*')[] = ['+', '-', '*'];
-      const operator = operators[Math.floor(Math.random() * operators.length)];
-
-      let answer = 0;
-      switch (operator) {
-        case '+': answer = num1 + num2; break;
-        case '-': answer = num1 - num2; break;
-        case '*': answer = num1 * num2; break;
-      }
-
-      this.mathQuestions.push({ id: i, num1, num2, operator, answer });
-    }
-    this.currentQuestionIndex = 0;
-  }
-
-  public getCurrentMathQuestion(): MathQuestion | null {
-    if (this.mathQuestions.length === 0) return null;
-    return this.mathQuestions[this.currentQuestionIndex];
-  }
-
-  public checkMathAnswer(input: number): boolean {
-    const current = this.getCurrentMathQuestion();
-    if (!current) return false;
-
-    const isCorrect = input === current.answer;
-
-    if (isCorrect) {
-      this.currentQuestionIndex++;
-      if (this.currentQuestionIndex >= this.mathQuestions.length) {
-        this.completeAlarm('math');
-      }
-    }
-    return isCorrect;
-  }
-
-  // --- Pedometer Logic ---
-
-  public startPedometerListener(onStepUpdate: (steps: number) => void): void {
-    if (Platform.OS === 'web') return;
-
-    this.stepSubscription = StepCounter.watchStepCount(
-      (event) => {
-        const totalSteps = event.steps;
-        const stepsTaken = totalSteps - this.initialStepCount;
-        
-        onStepUpdate(stepsTaken);
-        
-        if (stepsTaken >= this.stepsGoal) {
-          this.completeAlarm('pedometer');
-        }
-      },
-      { interval: 1000 }
-    );
-  }
-
-  public stopPedometerListener(): void {
-    if (this.stepSubscription) {
-      this.stepSubscription.remove();
-      this.stepSubscription = null;
-    }
-  }
-
-  // --- Audio & Completion ---
-
-  public async playAlarmSound(): Promise<void> {
-    try {
-      if (this.audioPlayer) {
-        await this.audioPlayer.stopAsync();
-      }
-      const { sound } = await Audio.Sound.createAsync(
-        require('../../assets/sounds/alarm.mp3'), // Placeholder path
-        { shouldPlay: true }
+/**
+ * Database Initialization
+ * Ensures persistence for the Discipline Protocol and Life Logs
+ */
+export const initDB = async (): Promise<void> => {
+  try {
+    await db.execAsync(`
+      PRAGMA journal_mode = WAL;
+      CREATE TABLE IF NOT EXISTS protocols (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        time TEXT NOT NULL,
+        icon TEXT NOT NULL,
+        enabled INTEGER DEFAULT 1
       );
-      this.audioPlayer = sound;
-    } catch (error) {
-      console.error('Error playing alarm:', error);
+      CREATE TABLE IF NOT EXISTS life_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        text TEXT NOT NULL,
+        happiness INTEGER NOT NULL,
+        deepWork INTEGER NOT NULL
+      );
+    `);
+
+    // Seed default protocol data if table is empty
+    const count: any = await db.getFirstAsync('SELECT COUNT(*) as count FROM protocols');
+    if (count.count === 0) {
+      await db.runAsync(
+        'INSERT INTO protocols (title, time, icon, enabled) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)',
+        ['Brain Check (Cognitive)', '3:00 AM', 'calculator-outline', 1],
+        ['Body Check (Physical)', '3:10 AM', 'fitness-outline', 1],
+        ['Time to Sleep', '9:00 PM', 'moon-outline', 1]
+      );
     }
+  } catch (error) {
+    console.error('Failed to initialize AlarmService Database:', error);
   }
+};
 
-  public async stopAlarmSound(): Promise<void> {
-    if (this.audioPlayer) {
-      await this.audioPlayer.stopAsync();
-      await this.audioPlayer.unloadAsync();
-      this.audioPlayer = null;
+/**
+ * ALARM & AUDIO LOGIC
+ * Manages the "Rise & Grind" high-fidelity alarm states
+ */
+let alarmSound: Audio.Sound | null = null;
+
+export const playAlarmSound = async (uri?: string): Promise<void> => {
+  try {
+    if (alarmSound) {
+      await alarmSound.unloadAsync();
     }
+    const { sound } = await Audio.Sound.createAsync(
+      uri ? { uri } : require('../assets/alarm_default.mp3'),
+      { shouldPlay: true, isLooping: true, volume: 1.0 }
+    );
+    alarmSound = sound;
+  } catch (error) {
+    console.error('Error playing alarm sound:', error);
   }
+};
 
-  private completeAlarm(type: AlarmType): void {
-    this.isAlarmActive = false;
-    this.stopPedometerListener();
-    this.stopAlarmSound();
-    console.log(`Alarm ${type} completed successfully.`);
+export const stopAlarmSound = async (): Promise<void> => {
+  if (alarmSound) {
+    await alarmSound.stopAsync();
+    await alarmSound.unloadAsync();
+    alarmSound = null;
   }
+};
 
-  public reset(): void {
-    this.isAlarmActive = false;
-    this.mathQuestions = [];
-    this.currentQuestionIndex = 0;
-    this.initialStepCount = 0;
-    this.stopPedometerListener();
-    this.stopAlarmSound();
-  }
-}
+/**
+ * PROTOCOL DATA MANAGEMENT
+ * Synchronized with ProfileScreen's "Discipline Protocol" section
+ */
+export const getProtocols = async (): Promise<ProtocolItem[]> => {
+  return await db.getAllAsync<ProtocolItem>('SELECT * FROM protocols ORDER BY time ASC');
+};
+
+export const toggleProtocol = async (id: number, enabled: boolean): Promise<void> => {
+  await db.runAsync('UPDATE protocols SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id]);
+};
+
+/**
+ * LIFE LOG MANAGEMENT
+ * Synchronized with ProfileScreen's "Life Log" activity feed
+ */
+export const getLifeLogs = async (): Promise<LifeLogEntry[]> => {
+  return await db.getAllAsync<LifeLogEntry>('SELECT * FROM life_logs ORDER BY id DESC');
+};
+
+export const addLifeLog = async (entry: Omit<LifeLogEntry, 'id'>): Promise<void> => {
+  await db.runAsync(
+    'INSERT INTO life_logs (date, text, happiness, deepWork) VALUES (?, ?, ?, ?)',
+    [entry.date, entry.text, entry.happiness, entry.deepWork]
+  );
+};
+
+/**
+ * SENSOR LOGIC (Body Check)
+ * Uses Accelerometer for the "Physical" verification step
+ */
+export const startBodyCheckMonitoring = (onThresholdMet: () => void) => {
+  Accelerometer.setUpdateInterval(100);
+  const subscription = Accelerometer.addListener((data) => {
+    const totalForce = Math.sqrt(data.x ** 2 + data.y ** 2 + data.z ** 2);
+    if (totalForce > 2.5) { // Threshold for vigorous movement (shaking/walking)
+      onThresholdMet();
+    }
+  });
+  return subscription;
+};
+
+// Initialize on service load
+initDB();
+
+export default {
+  playAlarmSound,
+  stopAlarmSound,
+  getProtocols,
+  toggleProtocol,
+  getLifeLogs,
+  addLifeLog,
+  startBodyCheckMonitoring
+};
