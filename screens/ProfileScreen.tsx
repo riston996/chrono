@@ -55,25 +55,34 @@ export default function ProfileScreen() {
   }, []);
 
   // 2. Event Handlers
-  const handleSaveLog = async () => {
+    const handleSaveLog = async () => {
     if (!journalInput.trim()) return;
 
+    // Match the LifeLogEntry interface in your AlarmService
     const newLog = {
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase(),
-      text: journalInput,
-      happiness: happiness,
-      deepWork: deepWork
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase(),
+        text: journalInput,
+        happiness: happiness,
+        deepWork: deepWork
     };
 
     try {
-      await AlarmService.addLifeLog(newLog);
-      // Update local state so UI refreshes immediately
-      setLogs([newLog, ...logs]); 
-      setJournalInput(''); 
+        // This now targets the 'life_logs' table, which has no 'title' constraint
+        await AlarmService.addLifeLog(newLog);
+        
+        // Refresh local state
+        const updatedLogs = await AlarmService.getLifeLogs();
+        setLogs(updatedLogs); 
+        
+        setJournalInput(''); 
+        setHappiness(3); 
+        setDeepWork(4);
     } catch (error) {
         console.error("Failed to save log:", error);
     }
-  };
+    };
+
+
 
   return (
     <SafeAreaView style={styles.container}>
@@ -88,13 +97,13 @@ export default function ProfileScreen() {
             />
             <View style={styles.statusDot} />
           </View>
-          <div style={styles.identityText}>
+          <View style={styles.identityText}>
             <Text style={styles.userName}>Alex Chen</Text>
             <View style={styles.streakBadge}>
               <Ionicons name="flame" size={14} color="#f59e0b" />
               <Text style={styles.streakText}>75-DAY STREAK</Text>
             </View>
-          </div>
+          </View>
         </View>
 
         {/* 2. Discipline Protocol */}
