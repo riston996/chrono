@@ -10,6 +10,7 @@ import {
   Dimensions,
   Alert,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native'; // If using React Navigation
 import { Ionicons } from '@expo/vector-icons';
 // Note: Ensure AlarmService is correctly implemented in your services folder
 import AlarmService from '../services/AlarmService'; 
@@ -31,9 +32,16 @@ interface Task {
   completed: boolean;
 }
 
-// --- Mock Data Generators ---
-const generateConsistencyData = () => {
-  return Array.from({ length: 98 }, () => Math.floor(Math.random() * 4));
+
+const getWakeUpColor = (waketime: number | undefined) => {
+  if (waketime === undefined) return '#1e293b'; // Empty/No data
+  
+  // Logic: 3am (dark green), 4am (blue), 5am (orange), 6am (dark orange), >6am (red)
+  if (waketime <= 3) return '#064e3b'; // Dark Green
+  if (waketime === 4) return '#3b82f6'; // Blue
+  if (waketime === 5) return '#f59e0b'; // Orange
+  if (waketime === 6) return '#d97706'; // Dark Orange
+  return '#ef4444'; // Red (After 6)
 };
 
 // --- Sub-Components ---
@@ -64,31 +72,63 @@ const AlarmCard = ({ time, condition, active, icon, onSolve }: AlarmProps) => (
   </View>
 );
 
-const ConsistencyGrid = () => {
-  const data = generateConsistencyData();
-  const getColor = (level: number) => {
-    switch (level) {
-      case 3: return '#10b981';
-      case 2: return '#059669';
-      case 1: return '#064e3b';
-      default: return '#1e293b';
-    }
-  };
+const ConsistencyGrid = ({ entries }: { entries: any[] }) => {
+  // We want to show a fixed grid (e.g., 98 squares). 
+  // We fill the end of the array with our real data.
+  const gridSlots = Array(98).fill(undefined);
+  
+
+  // Only run if entries exists and has length
+  if (entries && entries.length > 0) {
+    entries.forEach((entry, index) => {
+      // Ensure we don't go out of bounds of our 98-square grid
+      if (index < 98) {
+        // 97 is the last index. This puts newest data at the bottom-right.
+        gridSlots[97 - index] = entry.waketime;
+      }
+    });
+  }
 
   return (
     <View style={styles.gridContainer}>
       <Text style={styles.sectionLabel}>Wake-up Consistency (Last 90 Days)</Text>
       <View style={styles.githubGrid}>
-        {data.map((level, i) => (
-          <View key={i} style={[styles.gridSquare, { backgroundColor: getColor(level) }]} />
+        {gridSlots.map((waketime, i) => (
+          <View key={i} style={[styles.gridSquare, { backgroundColor: getWakeUpColor(waketime) }]} />
         ))}
       </View>
       <View style={styles.gridFooter}>
-        <Text style={styles.gridFooterText}>Less</Text>
-        {[0, 1, 2, 3].map(l => (
-           <View key={l} style={[styles.miniSquare, { backgroundColor: getColor(l) }]} />
+        <Text style={styles.gridFooterText}>Late</Text>
+        {[7, 6, 5, 4, 3].map(t => (
+           <View key={t} style={[styles.miniSquare, { backgroundColor: getWakeUpColor(t) }]} />
         ))}
-        <Text style={styles.gridFooterText}>More</Text>
+        <Text style={styles.gridFooterText}>Early</Text>
+      </View>
+      {/* Legend / Key Section */}
+      <View style={styles.legendContainer}>
+        <Text style={styles.legendLabel}>Target:</Text>
+        <View style={styles.legendRow}>
+          <View style={styles.legendItem}>
+            <View style={[styles.miniSquare, { backgroundColor: getWakeUpColor(3) }]} />
+            <Text style={styles.legendText}>3AM</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.miniSquare, { backgroundColor: getWakeUpColor(4) }]} />
+            <Text style={styles.legendText}>4AM</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.miniSquare, { backgroundColor: getWakeUpColor(5) }]} />
+            <Text style={styles.legendText}>5AM</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.miniSquare, { backgroundColor: getWakeUpColor(6) }]} />
+            <Text style={styles.legendText}>6AM</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.miniSquare, { backgroundColor: getWakeUpColor(7) }]} />
+            <Text style={styles.legendText}>7AM+</Text>
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -97,6 +137,58 @@ const ConsistencyGrid = () => {
 // --- Main Screen ---
 
 export default function MainScreen() {
+
+  const [activeCategory, setActiveCategory] = useState('work');
+  const [sleepEntries, setSleepEntries] = useState<any[]>([]);
+  // Fetch data from SQLite
+  const loadSleepData = useCallback(async () => {
+    try {
+      const data = await AlarmService.getSleepEntries();
+      setSleepEntries(data);
+    } catch (error) {
+      console.error("Failed to load sleep data", error);
+    }
+  }, []);
+
+  // Load on mount
+  React.useEffect(() => {
+    loadSleepData();
+  }, [loadSleepData]);
+
+  const activities = [
+  // Work
+  { id: '1', text: 'Review Q1 Sprint', category: 'work', completed: false },
+  { id: '2', text: 'Client Onboarding Call', category: 'work', completed: true },
+  { id: '3', text: 'Email Clean-up', category: 'work', completed: false },
+  
+  // Startup
+  { id: '4', text: 'Pitch Deck V2 Edits', category: 'startup', completed: false },
+  { id: '5', text: 'Founder Coffee @ 10am', category: 'startup', completed: false },
+  { id: '6', text: 'AWS Architecture Review', category: 'startup', completed: true },
+
+  // Family
+  { id: '7', text: 'Buy Anniversary Gift', category: 'family', completed: false },
+  { id: '8', text: 'Call Mom', category: 'family', completed: true },
+  { id: '9', text: 'School Pickup @ 3pm', category: 'family', completed: false },
+
+  // Personal
+  { id: '10', text: 'Gym: Leg Day', category: 'personal', completed: false },
+  { id: '11', text: 'Read 20 Pages', category: 'personal', completed: false },
+  { id: '12', text: 'Meditation (10 min)', category: 'personal', completed: true },
+];
+
+  const categories = [
+    { id: 'work', label: 'Work', color: '#4D96FF' },
+    { id: 'startup', label: 'Startup', color: '#6BCB77' },
+    { id: 'family', label: 'Family', color: '#FF6B6B' },
+    { id: 'personal', label: 'Personal', color: '#FFD93D' },
+  ];
+
+  // Logic: Filter by category, then take the first 3
+  const filteredActivities = activities
+    .filter(t => t.category === activeCategory)
+    .slice(0, 3);
+
   const [tasks, setTasks] = useState<Task[]>([
     { id: 1, text: 'Deep Work Session (2 hours)', completed: true },
     { id: 2, text: 'Gym Workout (1 hour)', completed: false },
@@ -124,7 +216,7 @@ export default function MainScreen() {
       <StatusBar barStyle="light-content" />
       
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Rise & Shine</Text>
+        <Text style={styles.headerTitle}>CHORNOS PROTOCOL</Text>
         <TouchableOpacity>
           <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
         </TouchableOpacity>
@@ -150,11 +242,11 @@ export default function MainScreen() {
           />
         </View>
 
-        <ConsistencyGrid />
+        <ConsistencyGrid entries={sleepEntries} />
 
         <View style={styles.agendaContainer}>
           <View style={styles.agendaHeader}>
-            <Text style={styles.sectionLabel}>Today's Objectives</Text>
+            <Text style={styles.sectionLabel}>Morning's Objectives</Text>
             <TouchableOpacity><Text style={styles.addText}>+ Add Task</Text></TouchableOpacity>
           </View>
           
@@ -175,6 +267,64 @@ export default function MainScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+
+        <View style={styles.mainContainer}>
+      {/* 2x2 Quadrant Grid */}
+      <View style={styles.grid}>
+        {categories.map((cat) => (
+          <TouchableOpacity
+            key={cat.id}
+            activeOpacity={0.7}
+            onPress={() => setActiveCategory(cat.id)}
+            style={[
+              styles.quadrant,
+              { backgroundColor: cat.color + '15' }, // 15% opacity background
+              activeCategory === cat.id ? { borderColor: cat.color, borderWeight: 2 } : { borderColor: 'transparent' }
+            ]}
+          >
+            <Text style={[styles.quadrantLabel, { color: cat.color }]}>
+              {cat.label}
+            </Text>
+            {/* Subtext indicator */}
+            <Text style={{ fontSize: 10, color: cat.color, opacity: 0.7 }}>
+              {activities.filter(a => a.category === cat.id).length} Tasks
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Activity List Section */}
+      <View style={styles.todoContainer}>
+        <View style={styles.todoHeader}>
+          <Text style={styles.todosectionLabel}>
+            {activeCategory.toUpperCase()} OBJECTIVES
+          </Text>
+          <TouchableOpacity>
+            <Text style={[styles.todoaddText, { color: categories.find(c => c.id === activeCategory).color }]}>
+              + Add
+            </Text>
+          </TouchableOpacity>
+        </View>
+        
+        {filteredActivities.map(item => (
+          <TouchableOpacity 
+            key={item.id} 
+            style={styles.taskItem} 
+            onPress={() => toggleTask(item.id)} // Assuming toggleTask exists in your parent
+          >
+            <Ionicons 
+              name={item.completed ? "checkbox" : "square-outline"} 
+              size={22} 
+              color={categories.find(c => c.id === activeCategory).color} 
+            />
+            <Text style={[styles.todotaskText, item.completed && styles.taskCompleted]}>
+              {item.text}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
 
         <View style={styles.footerQuote}>
           <Text style={styles.quoteText}>
@@ -377,4 +527,62 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     opacity: 0.8,
   },
+  mainContainer: { flex: 1, padding: 16, backgroundColor: '#0f172a' },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  quadrant: {
+    width: '48%',
+    aspectRatio: 1.2,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  quadrantLabel: { fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  todoContainer: { backgroundColor: '#1e293b', borderRadius: 20, padding: 20 },
+  todoHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 15 
+  },
+  todosectionLabel: { color: '#94a3b8', fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  todoaddText: { fontWeight: '600' },
+  
+  todotaskText: { color: '#f8fafc', marginLeft: 12, fontSize: 16 },
+  legendContainer: {
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+  },
+  legendLabel: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '700',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  legendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  legendText: {
+    color: '#94a3b8',
+    fontSize: 10,
+    marginLeft: 6,
+    fontWeight: '600',
+  },
+  
 });
