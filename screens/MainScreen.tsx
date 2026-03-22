@@ -9,6 +9,7 @@ import {
   ScrollView,
   Dimensions,
   Alert,
+  TextInput
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native'; // If using React Navigation
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +31,14 @@ interface Task {
   id: number;
   text: string;
   completed: boolean;
+}
+
+export interface AppTask {
+  id: number;
+  text: string;
+  category: string;
+  completed: number; // 0 or 1
+  date: string;
 }
 
 
@@ -139,7 +148,13 @@ const ConsistencyGrid = ({ entries }: { entries: any[] }) => {
 export default function MainScreen() {
 
   const [activeCategory, setActiveCategory] = useState('work');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [todaysWakeTime, setTodaysWakeTime] = useState(5);
   const [sleepEntries, setSleepEntries] = useState<any[]>([]);
+  const [dbTasks, setDbTasks] = useState<AppTask[]>([]);
+  const [newTaskText, setNewTaskText] = useState('');
+  const [isAddingTask, setIsAddingTask] = useState<string | null>(null); // To show/hide input
+
   // Fetch data from SQLite
   const loadSleepData = useCallback(async () => {
     try {
@@ -150,10 +165,94 @@ export default function MainScreen() {
     }
   }, []);
 
+  // Load tasks from DB
+  const loadTasks = async () => {
+    const data = await AlarmService.getIncompleteTasks();
+    setDbTasks(data);
+  };
+
+  React.useEffect(() => { loadTasks(); }, []);
+
+  // Handler to add a task
+  const handleAddTask = async (category: string) => {
+    console.log(category,text)
+    Alert.prompt("New Task", `Add to ${category}`, async (text) => {
+      if (text) {
+        await AlarmService.addTask(text, category);
+        await loadTasks(); // Refresh list
+      }
+    });
+  };
+
+  const handleSaveTask = async (category: string) => {
+  if (newTaskText.trim().length === 0) {
+    setIsAddingTask(null);
+    return;
+  }
+
+  try {
+    await AlarmService.addTask(newTaskText, category);
+    setNewTaskText(''); // Clear input
+    setIsAddingTask(null); // Hide input
+    await loadTasks(); // Refresh from DB
+  } catch (error) {
+    console.error("Failed to add task", error);
+  }
+};
+
+  // Handler to toggle (and hide) task
+  const handleToggleTask = async (id: number) => {
+    await AlarmService.updateTaskStatus(id, true); // Mark as complete
+    await loadTasks(); // Refresh (it will disappear because we only fetch completed = 0)
+  };
+
+  // Filtered lists for the UI
+ 
+
   // Load on mount
   React.useEffect(() => {
     loadSleepData();
   }, [loadSleepData]);
+
+  // 2. Logic to "fetch" the existing time for the selected date
+React.useEffect(() => {
+  const existingEntry = sleepEntries.find(e => e.date === selectedDate);
+  if (existingEntry) {
+    setTodaysWakeTime(existingEntry.waketime);
+  } else {
+    setTodaysWakeTime(5); // Default if no data exists for that day
+  }
+}, [selectedDate, sleepEntries]);
+
+const handleSaveWakeUp = async () => {
+  try {
+    await AlarmService.addSleepEntry({
+      date: selectedDate,
+      waketime: todaysWakeTime,
+      sleeptime: 0, 
+    });
+    
+    const updatedData = await AlarmService.getSleepEntries();
+    
+    // --- MANUAL TABLE LOG ---
+    // console.log(`\n==== DATABASE EXPORT: ${selectedDate} ====`);
+    // if (updatedData.length === 0) {
+    //   console.log("Table is empty.");
+    // } else {
+    //   updatedData.forEach((row, i) => {
+    //     console.log(`[${i}] Date: ${row.date} | Wake: ${row.waketime}AM | ID: ${row.id}`);
+    //   });
+    // }
+    // console.log(`==========================================\n`);
+
+    setSleepEntries(updatedData);
+    Alert.alert("Success", "Protocol updated.");
+  } catch (error) {
+    console.error("Failed to update wake-up time", error);
+  }
+};
+
+ 
 
   const activities = [
   // Work
@@ -184,10 +283,8 @@ export default function MainScreen() {
     { id: 'personal', label: 'Personal', color: '#FFD93D' },
   ];
 
-  // Logic: Filter by category, then take the first 3
-  const filteredActivities = activities
-    .filter(t => t.category === activeCategory)
-    .slice(0, 3);
+
+  const filteredActivities = dbTasks.filter(t => t.category === activeCategory);
 
   const [tasks, setTasks] = useState<Task[]>([
     { id: 1, text: 'Deep Work Session (2 hours)', completed: true },
@@ -242,89 +339,152 @@ export default function MainScreen() {
           />
         </View>
 
+        <View style={styles.logSection}>
+          <View style={styles.logHeader}>
+            <Text style={styles.sectionLabel}>EDIT PROTOCOL LOG</Text>
+            <Text style={styles.dateDisplay}>{selectedDate}</Text>
+          </View>
+
+          {/* Quick Date Switcher */}
+          <View style={styles.datePickerRow}>
+            {[0, 1, 2].map((offset) => {
+              const d = new Date();
+              d.setDate(d.getDate() - offset);
+              const dStr = d.toISOString().split('T')[0];
+              const label = offset === 0 ? "Today" : offset === 1 ? "Yesterday" : dStr.split('-').slice(1).join('/');
+              
+              return (
+                <TouchableOpacity 
+                  key={dStr}
+                  style={[styles.dateTab, selectedDate === dStr && styles.activeDateTab]}
+                  onPress={() => setSelectedDate(dStr)}
+                >
+                  <Text style={[styles.dateTabText, selectedDate === dStr && styles.activeDateTabText]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.logControls}>
+            <View style={styles.timePicker}>
+              {[3, 4, 5, 6, 7].map((time) => (
+                <TouchableOpacity 
+                  key={time}
+                  style={[
+                    styles.timeButton, 
+                    todaysWakeTime === time && { backgroundColor: getWakeUpColor(time), borderColor: 'transparent' }
+                  ]}
+                  onPress={() => setTodaysWakeTime(time)}
+                >
+                  <Text style={[styles.timeButtonText, todaysWakeTime === time && { color: '#fff' }]}>
+                    {time < 7 ? `${time}AM` : '7+'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
+            <TouchableOpacity style={styles.saveLogButton} onPress={handleSaveWakeUp}>
+              <Text style={styles.saveLogText}>UPDATE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <ConsistencyGrid entries={sleepEntries} />
 
         <View style={styles.agendaContainer}>
-          <View style={styles.agendaHeader}>
-            <Text style={styles.sectionLabel}>Morning's Objectives</Text>
-            <TouchableOpacity><Text style={styles.addText}>+ Add Task</Text></TouchableOpacity>
+            <View style={styles.agendaHeader}>
+              <Text style={styles.sectionLabel}>Morning's Objectives</Text>
+                <TouchableOpacity onPress={() => setIsAddingTask('morning')}>
+                  <Text style={styles.addText}>+ Add</Text>
+                </TouchableOpacity>
+            </View>
+
+            {/* Inline Input Field */}
+            {isAddingTask === 'morning' && (
+              <View style={styles.inlineInputContainer}>
+                <TextInput
+                  style={styles.inlineInput}
+                  placeholder="What needs doing?"
+                  placeholderTextColor="#64748b"
+                  value={newTaskText}
+                  onChangeText={setNewTaskText}
+                  autoFocus
+                  onSubmitEditing={() => handleSaveTask('morning')}
+                />
+              </View>
+            )}
+            
+            {dbTasks.filter(a => a.category === "morning").slice(0, 3).map(task => (
+              <TouchableOpacity 
+                  key={task.id} 
+                  style={styles.taskItem} 
+                  onPress={() => handleToggleTask(task.id)}
+              >
+                <Ionicons name="square-outline" size={22} color="#64748b" />
+                <Text style={styles.taskText}>{task.text}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-          
-          {tasks.map(task => (
-            <TouchableOpacity 
-                key={task.id} 
+
+
+         <View style={styles.mainContainer}>
+            <View style={styles.grid}>
+            {categories.map((cat) => (
+              <TouchableOpacity
+                key={cat.id}
+                onPress={() => setActiveCategory(cat.id)}
+                style={[
+                  styles.quadrant,
+                  { backgroundColor: cat.color + '15' },
+                  activeCategory === cat.id ? { borderColor: cat.color } : { borderColor: 'transparent' }
+                ]}
+              >
+                <Text style={[styles.quadrantLabel, { color: cat.color }]}>{cat.label}</Text>
+                <Text style={{ fontSize: 10, color: cat.color }}>
+                  {dbTasks.filter(a => a.category === cat.id).length} Active
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.todoContainer}>
+            <View style={styles.todoHeader}>
+              <Text style={styles.todosectionLabel}>{activeCategory.toUpperCase()} OBJECTIVES</Text>
+              <TouchableOpacity onPress={() => setIsAddingTask(activeCategory)}>
+                <Text style={[styles.todoaddText, { color: categories.find(c => c.id === activeCategory).color }]}>
+                  + Add
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {isAddingTask === activeCategory && (
+              <View style={[styles.inlineInputContainer, { borderBottomColor: categories.find(c => c.id === activeCategory).color }]}>
+                <TextInput
+                  style={styles.todotaskText}
+                  placeholder="Enter goal..."
+                  placeholderTextColor="#64748b"
+                  value={newTaskText}
+                  onChangeText={setNewTaskText}
+                  autoFocus
+                  onSubmitEditing={() => handleSaveTask(activeCategory)}
+                />
+              </View>
+            )}
+            
+            {filteredActivities.map(item => (
+              <TouchableOpacity 
+                key={item.id} 
                 style={styles.taskItem} 
-                onPress={() => toggleTask(task.id)}
-            >
-              <Ionicons 
-                name={task.completed ? "checkbox" : "square-outline"} 
-                size={22} 
-                color={task.completed ? "#00E5FF" : "#64748b"} 
-              />
-              <Text style={[styles.taskText, task.completed && styles.taskCompleted]}>
-                {task.text}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                onPress={() => handleToggleTask(item.id)}
+              >
+                <Ionicons name="square-outline" size={22} color={categories.find(c => c.id === activeCategory).color} />
+                <Text style={styles.todotaskText}>{item.text}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-
-
-        <View style={styles.mainContainer}>
-      {/* 2x2 Quadrant Grid */}
-      <View style={styles.grid}>
-        {categories.map((cat) => (
-          <TouchableOpacity
-            key={cat.id}
-            activeOpacity={0.7}
-            onPress={() => setActiveCategory(cat.id)}
-            style={[
-              styles.quadrant,
-              { backgroundColor: cat.color + '15' }, // 15% opacity background
-              activeCategory === cat.id ? { borderColor: cat.color, borderWeight: 2 } : { borderColor: 'transparent' }
-            ]}
-          >
-            <Text style={[styles.quadrantLabel, { color: cat.color }]}>
-              {cat.label}
-            </Text>
-            {/* Subtext indicator */}
-            <Text style={{ fontSize: 10, color: cat.color, opacity: 0.7 }}>
-              {activities.filter(a => a.category === cat.id).length} Tasks
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Activity List Section */}
-      <View style={styles.todoContainer}>
-        <View style={styles.todoHeader}>
-          <Text style={styles.todosectionLabel}>
-            {activeCategory.toUpperCase()} OBJECTIVES
-          </Text>
-          <TouchableOpacity>
-            <Text style={[styles.todoaddText, { color: categories.find(c => c.id === activeCategory).color }]}>
-              + Add
-            </Text>
-          </TouchableOpacity>
-        </View>
-        
-        {filteredActivities.map(item => (
-          <TouchableOpacity 
-            key={item.id} 
-            style={styles.taskItem} 
-            onPress={() => toggleTask(item.id)} // Assuming toggleTask exists in your parent
-          >
-            <Ionicons 
-              name={item.completed ? "checkbox" : "square-outline"} 
-              size={22} 
-              color={categories.find(c => c.id === activeCategory).color} 
-            />
-            <Text style={[styles.todotaskText, item.completed && styles.taskCompleted]}>
-              {item.text}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
 
         <View style={styles.footerQuote}>
           <Text style={styles.quoteText}>
@@ -584,5 +744,106 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontWeight: '600',
   },
+  logSection: {
+    backgroundColor: '#111827',
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    marginTop: 10,
+  },
+  logControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 5,
+  },
+  timePicker: {
+    flexDirection: 'row',
+    flex: 1,
+    gap: 8,
+  },
+  timeButton: {
+    backgroundColor: '#1e293b',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    minWidth: 45,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  timeButtonText: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  saveLogButton: {
+    backgroundColor: '#00E5FF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginLeft: 10,
+  },
+  saveLogText: {
+    color: '#0f172a',
+    fontWeight: '900',
+    fontSize: 12,
+    marginLeft: 5,
+  },
+  logHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  dateDisplay: {
+    color: '#00E5FF',
+    fontSize: 12,
+    fontWeight: '700',
+    backgroundColor: 'rgba(0, 229, 255, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  datePickerRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 15,
+  },
+  dateTab: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#1e293b',
+  },
+  activeDateTab: {
+    backgroundColor: '#334155',
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  dateTabText: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  activeDateTabText: {
+    color: '#fff',
+  },
+
+  inlineInputContainer: {
+  borderBottomWidth: 1,
+  borderBottomColor: '#00E5FF',
+  paddingVertical: 10,
+  marginBottom: 10,
+  },
+  inlineInput: {
+    color: '#e2e8f0',
+    fontSize: 15,
+    paddingLeft: 34, // Matches the icon alignment
+  },
+  // ... rest of your existing log styles ...
   
 });

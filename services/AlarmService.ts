@@ -31,6 +31,14 @@ export interface SleepEntry {
   sleeptime: number;
 }
 
+export interface AppTask {
+  id: number;
+  text: string;
+  category: string;
+  completed: number; // 0 or 1
+  date: string;
+}
+
 //lifelogentry is similar item with type id, date, text, happiness, deepwork 
 
 const DB_NAME = 'chrono_db';
@@ -53,6 +61,9 @@ const db = SQLite.openDatabaseSync(DB_NAME);
 // async file is provided 
 
 export const initDB = async (): Promise<void> => {
+  // await db.execAsync('DROP TABLE IF EXISTS sleep_entry;');
+  // await db.execAsync('DROP TABLE IF EXISTS tasks;');
+  // console.log("Tasks table dropped successfully.");
   try {
     await db.execAsync(`
       PRAGMA journal_mode = WAL;
@@ -72,11 +83,22 @@ export const initDB = async (): Promise<void> => {
       );
       CREATE TABLE IF NOT EXISTS sleep_entry (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        date TEXT NOT NULL,
-        waketime INTEGER NOT NULL, -- Removed the colon
-        sleeptime INTEGER NOT NULL  -- Removed the colon
+        date TEXT NOT NULL UNIQUE,
+        waketime INTEGER NOT NULL, 
+        sleeptime INTEGER NOT NULL 
+      );
+      CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        category TEXT NOT NULL,
+        completed INTEGER DEFAULT 0,
+        priority INTEGER DEFAULT 1,
+        date TEXT NOT NULL
       );
     `);
+
+
+ 
 
     // Seed default protocol data if table is empty
     const count: any = await db.getFirstAsync('SELECT COUNT(*) as count FROM protocols');
@@ -91,6 +113,9 @@ export const initDB = async (): Promise<void> => {
       ]
     );
     }
+
+    await seedTasks();
+
     // 2. Seed Sleep Data (March 1st to March 20th)
     const sleepCount: any = await db.getFirstAsync('SELECT COUNT(*) as count FROM sleep_entry');
     if (sleepCount.count === 0) {
@@ -163,6 +188,15 @@ export const toggleProtocol = async (id: number, enabled: boolean): Promise<void
   await db.runAsync('UPDATE protocols SET enabled = ? WHERE id = ?', [enabled ? 1 : 0, id]);
 };
 
+// Fetch only incomplete tasks for today
+export const getIncompleteTasks = async (): Promise<AppTask[]> => {
+  const today = new Date().toISOString().split('T')[0];
+  return await db.getAllAsync<AppTask>(
+    'SELECT * FROM tasks WHERE completed = 0 AND date = ?', 
+    [today]
+  );
+};
+
 /**
  * LIFE LOG MANAGEMENT
  * Synchronized with ProfileScreen's "Life Log" activity feed
@@ -193,10 +227,10 @@ export const getSleepEntries = async (): Promise<SleepEntry[]> => {
   return await db.getAllAsync<SleepEntry>('SELECT * FROM sleep_entry ORDER BY date DESC');
 };
 
-// Add a new sleep entry to the table
-export const addSleepEntry = async (entry: Omit<SleepEntry, 'id'>): Promise<void> => {
+export const  addSleepEntry = async (entry: Omit<SleepEntry, 'id'>): Promise<void> => {
   await db.runAsync(
-    'INSERT INTO sleep_entry (date, waketime, sleeptime) VALUES (?, ?, ?)',
+    // This will Update if the date exists, or Insert if it doesn't
+    'INSERT OR REPLACE INTO sleep_entry (date, waketime, sleeptime) VALUES (?, ?, ?)',
     [entry.date, entry.waketime, entry.sleeptime]
   );
 };
@@ -230,16 +264,72 @@ export const initializeService = async () => {
   await initDB();
 };
 
+export const updateTaskStatus = async (id: number, completed: boolean) => {
+  await db.runAsync(
+    'UPDATE tasks SET completed = ? WHERE id = ?',
+    [completed ? 1 : 0, id]
+  );
+};
+
+// Add a new task
+export const addTask = async (text: string, category: string): Promise<void> => {
+  const today = new Date().toISOString().split('T')[0];
+  await db.runAsync(
+    'INSERT INTO tasks (text, category, completed, date) VALUES (?, ?, 0, ?)',
+    [text, category, today]
+  );
+};
+
+export const seedTasks = async (): Promise<void> => {
+  const today = new Date().toISOString().split('T')[0];
+  
+  // Check if tasks already exist
+  const count: any = await db.getFirstAsync('SELECT COUNT(*) as count FROM tasks');
+  
+  if (count.count === 0) {
+    console.log("Seeding initial task data...");
+    const initialTasks = [
+      // Work
+      { text: 'Review Q1 Sprint Data', cat: 'work' },
+      { text: 'Sync with Design Team', cat: 'work' },
+      // Startup
+      { text: 'Finalize Pitch Deck V3', cat: 'startup' },
+      { text: 'Submit AWS Credits App', cat: 'startup' },
+      // Family
+      { text: 'Plan Sunday Dinner', cat: 'family' },
+      { text: 'Buy Anniversary Flowers', cat: 'family' },
+      // Personal
+      { text: 'Gym: 5km Run', cat: 'personal' },
+      { text: 'Read 10 Pages of "Deep Work"', cat: 'personal' },
+       { text: 'Read 10 Pages of "Deep Work"', cat: 'morning' },
+    ];
+
+    for (const task of initialTasks) {
+      await db.runAsync(
+        'INSERT INTO tasks (text, category, completed, date) VALUES (?, ?, 0, ?)',
+        [task.text, task.cat, today]
+      );
+    }
+    console.log("Tasks seeded successfully.");
+  }
+};
+
+
+
+
 export default {
   playAlarmSound,
   stopAlarmSound,
   getProtocols,
   toggleProtocol,
   getLifeLogs,
+  addTask,
   addLifeLog,
+  updateTaskStatus,
   getSleepEntries, // Added
   addSleepEntry,   // Added
   deleteSleepEntry,
   startBodyCheckMonitoring,
-  initializeService
+  initializeService,
+  getIncompleteTasks
 };
